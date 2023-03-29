@@ -70,7 +70,7 @@ class MyViewModel(
         coroutineScope.launch {
             coroutineScope { // limits the scope of concurrency
 
-                val jsonFileString = getJsonDataFromAsset(context, "db.json")
+                val jsonFileString = getJsonDataFromAsset(context, "db2.json")
                 val gson = Gson()
                 val resultObject = object : TypeToken<ResultScanStock>() {}.type
 

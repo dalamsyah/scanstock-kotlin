@@ -142,6 +142,7 @@
         android:layout_height="wrap_content"/>
 
     <SurfaceView
+        android:visibility="gone"
         android:id="@+id/cameraSurfaceView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -151,6 +152,7 @@
         app:layout_constraintTop_toTopOf="parent" />
 
     <View
+        android:visibility="gone"
         android:id="@+id/barcode_line"
         android:layout_width="match_parent"
         android:layout_height="2dp"

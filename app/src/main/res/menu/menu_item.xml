@@ -7,10 +7,6 @@
         android:title="menu">
         <menu>
             <item
-                android:id="@+id/importData"
-                android:title="Import Data"
-                app:showAsAction="never" />
-            <item
                 android:id="@+id/setting"
                 android:title="Setting Url"
                 app:showAsAction="never" />

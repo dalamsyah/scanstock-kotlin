@@ -1,7 +1,9 @@
 package com.scan.stock
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.DialogInterface
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
@@ -13,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -56,23 +59,38 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraSource: CameraSource
     private lateinit var barcodeDetector: BarcodeDetector
     private var scannedValue = ""
+    private val intentRack =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
 
-    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        menuInflater.inflate(R.menu.menu_item, menu)
-        return super.onCreateOptionsMenu(menu)
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId){
-            R.id.setting -> {
-
-            }
-            R.id.importData -> {
-                dialog.show()
+            if (result.resultCode == Activity.RESULT_OK) {
+                val s = result.data?.getStringExtra("barcode").toString()
+                rack = s
+                binding.txtRack.text = "Rack: ${rack}"
             }
         }
-        return super.onOptionsItemSelected(item)
-    }
+
+    private val intentItem =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+
+            if (result.resultCode == Activity.RESULT_OK) {
+                val item = result.data?.getStringExtra("barcode").toString()
+                scanValidate(item)
+            }
+        }
+
+//    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+//        menuInflater.inflate(R.menu.menu_item, menu)
+//        return super.onCreateOptionsMenu(menu)
+//    }
+//
+//    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+//        when (item.itemId){
+//            R.id.setting -> {
+//
+//            }
+//        }
+//        return super.onOptionsItemSelected(item)
+//    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,13 +109,7 @@ class MainActivity : AppCompatActivity() {
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             askForCameraPermission()
-        } else {
-            setupControls()
         }
-
-        val aniSlide: Animation =
-            AnimationUtils.loadAnimation(this@MainActivity, R.anim.scanner_animation)
-        binding.barcodeLine.startAnimation(aniSlide)
 
         viewModel.getCountScanned(db).observe(this) {
             binding.txtCount.text = it.toString()
@@ -107,12 +119,24 @@ class MainActivity : AppCompatActivity() {
             binding.txtTotalData.text = it.toString()
         }
 
-        viewModel.getList(db).observe(this) {
-            sampleAdapter.submitList(it)
+        GlobalScope.launch {
+            sampleAdapter.submitList(db.daoScanStock().getAll2())
         }
+
+//        viewModel.getList(db).observe(this) {
+//            sampleAdapter.submitList(it)
+//        }
 
         binding.btnScanManual.setOnClickListener {
             scanValidate(binding.etBarcodeManual.text.toString())
+        }
+
+        binding.btnScanItem.setOnClickListener {
+            intentItem.launch(Intent(this, ScannerItem::class.java))
+        }
+
+        binding.btnScanRack.setOnClickListener {
+            intentRack.launch(Intent(this, ScannerItem::class.java))
         }
 
         binding.btnUpload.setOnClickListener {
@@ -131,7 +155,7 @@ class MainActivity : AppCompatActivity() {
                         "scan_datetime" to it.scan_datetime,
                     )
 
-                    val api = NetworkConfig().getService("http://192.168.56.1/scanbarcode/").post(body).execute()
+                    val api = NetworkConfig().getService("https://portal.tpi-mexico.com/scanbarcode/").post(body).execute()
 
                     println(it)
 
@@ -152,10 +176,6 @@ class MainActivity : AppCompatActivity() {
 
 
 
-        }
-
-        binding.btnScanItem.setOnClickListener {
-            scanValidate("")
         }
 
         binding.btnCalculate.setOnClickListener {
@@ -183,10 +203,12 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
 
-                    dialog.show()
+                    runOnUiThread {
+                        dialog.show()
+                    }
 
                     try {
-                        val jsonFileString = getJsonDataFromAsset(applicationContext, "db2.json")
+                        val jsonFileString = getJsonDataFromAsset(applicationContext, "db.json")
                         val gson = Gson()
                         val resultObject = object : TypeToken<ResultScanStock>() {}.type
 
@@ -198,8 +220,13 @@ class MainActivity : AppCompatActivity() {
                             db.daoScanStock().insert(it)
                             index++
                         }
+
+                        sampleAdapter.submitList(db.daoScanStock().getAll2())
+
                     } finally {
-                        dialog.dismiss()
+                        runOnUiThread {
+                            dialog.dismiss()
+                        }
                     }
                 }
 
@@ -286,10 +313,20 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(applicationContext, "Scan rack first.", Toast.LENGTH_SHORT).show()
         } else {
             GlobalScope.launch {
-                val sdf = SimpleDateFormat("yyyy-MM-dd hh:mm:ss")
-                val currentDate = sdf.format(Date())
 
-                db.daoScanStock().update(1, currentDate, barcode)
+                if (db.daoScanStock().checkBeforeScan(barcode) > 0) {
+                    val sdf = SimpleDateFormat("yyyy-MM-dd hh:mm:ss")
+                    val currentDate = sdf.format(Date())
+
+                    db.daoScanStock().update(1, currentDate, barcode)
+
+                    sampleAdapter.submitList(db.daoScanStock().getAll2())
+                } else {
+                    runOnUiThread {
+                        Toast.makeText(applicationContext, "Item not found!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
             }
         }
     }
@@ -394,13 +431,13 @@ class MainActivity : AppCompatActivity() {
                     //Don't forget to add this line printing value or finishing activity must run on main thread
                     runOnUiThread {
                         cameraSource.stop()
-                        Toast.makeText(this@MainActivity, "value- $scannedValue", Toast.LENGTH_SHORT).show()
-                        finish()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "value- $scannedValue",
+                            Toast.LENGTH_SHORT
+                        ).show()
+//                        finish()
                     }
-                }else
-                {
-                    Toast.makeText(this@MainActivity, "value- else", Toast.LENGTH_SHORT).show()
-
                 }
             }
         })

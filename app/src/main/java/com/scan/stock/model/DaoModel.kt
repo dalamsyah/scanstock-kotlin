@@ -8,6 +8,9 @@ interface DaoModel {
     @Query("SELECT * FROM ScanStock ORDER BY sn ASC")
     fun getAll(): Flow<List<ScanStock>>
 
+    @Query("SELECT * FROM ScanStock ORDER BY sn ASC")
+    fun getAll2(): List<ScanStock>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(vararg scanStock: ScanStock)
 
@@ -35,5 +38,7 @@ interface DaoModel {
     @Query("SELECT * FROM ScanStock WHERE scan > 0 AND upload = 0")
     fun getListForUpload(): List<ScanStock>
 
+    @Query("SELECT COUNT(sn) FROM ScanStock WHERE sn = :barcode")
+    fun checkBeforeScan(barcode: String) : Int
 
 }
