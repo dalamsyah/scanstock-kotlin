@@ -2,30 +2,34 @@ package com.scan.stock
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.util.Log
 import android.view.*
-import android.view.animation.Animation
-import android.view.animation.AnimationUtils
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.room.Room
+import com.firebase.ui.database.FirebaseRecyclerAdapter
+import com.firebase.ui.database.FirebaseRecyclerOptions
 import com.google.android.gms.vision.CameraSource
 import com.google.android.gms.vision.Detector
 import com.google.android.gms.vision.barcode.Barcode
 import com.google.android.gms.vision.barcode.BarcodeDetector
+import com.google.firebase.database.*
+import com.google.firebase.database.ktx.database
+import com.google.firebase.ktx.Firebase
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.scan.stock.database.MyDB
@@ -38,14 +42,11 @@ import com.scan.stock.utils.getJsonDataFromAsset
 import com.scan.stock.viewmodel.MyViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -58,7 +59,10 @@ class MainActivity : AppCompatActivity() {
     private val requestCodeCameraPermission = 1001
     private lateinit var cameraSource: CameraSource
     private lateinit var barcodeDetector: BarcodeDetector
+    private lateinit var scanStockAdapter: FirebaseRecyclerAdapter<ScanStock, ScanStockHolder?>
     private var scannedValue = ""
+    private lateinit var database: DatabaseReference
+
     private val intentRack =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
 
@@ -99,6 +103,7 @@ class MainActivity : AppCompatActivity() {
 
         db = Room.databaseBuilder(applicationContext, MyDB::class.java, "my-db").fallbackToDestructiveMigration().build()
         val viewModel: MyViewModel = ViewModelProvider(this)[MyViewModel::class.java]
+        database = Firebase.database.reference
 
         setProgressDialog()
 
@@ -111,13 +116,13 @@ class MainActivity : AppCompatActivity() {
             askForCameraPermission()
         }
 
-        viewModel.getCountScanned(db).observe(this) {
-            binding.txtCount.text = it.toString()
-        }
-
-        viewModel.getTotalData(db).observe(this) {
-            binding.txtTotalData.text = it.toString()
-        }
+//        viewModel.getCountScanned(db).observe(this) {
+//            binding.txtCount.text = it.toString()
+//        }
+//
+//        viewModel.getTotalData(db).observe(this) {
+//            binding.txtTotalData.text = it.toString()
+//        }
 
         GlobalScope.launch {
             sampleAdapter.submitList(db.daoScanStock().getAll2())
@@ -128,7 +133,15 @@ class MainActivity : AppCompatActivity() {
 //        }
 
         binding.btnScanManual.setOnClickListener {
-            scanValidate(binding.etBarcodeManual.text.toString())
+
+            database.child("data").get().addOnSuccessListener {
+                if (it.child("sn").value == "000000207917") {
+                    binding.txtCount.text = it.childrenCount.toString()
+                }
+
+            }
+
+//            scanValidate(binding.etBarcodeManual.text.toString())
         }
 
         binding.btnScanItem.setOnClickListener {
@@ -208,7 +221,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     try {
-                        val jsonFileString = getJsonDataFromAsset(applicationContext, "db.json")
+                        val jsonFileString = getJsonDataFromAsset(applicationContext, "db2.json")
                         val gson = Gson()
                         val resultObject = object : TypeToken<ResultScanStock>() {}.type
 
@@ -235,17 +248,77 @@ class MainActivity : AppCompatActivity() {
 
         }
 
-        binding.apply {
-            recyclerView.apply {
-                layoutManager = LinearLayoutManager(this@MainActivity)
-                adapter = sampleAdapter
-            }
-        }
-
         binding.circularProgressBar.apply {
             // or with animation
             setProgressWithAnimation(65f, 1000) // =1s
 
+        }
+
+
+
+
+
+
+        val query: Query = database
+            .child("data")
+            .limitToLast(1)
+
+//        val query2: Query = database
+//            .child("data")
+//
+//        query2.get().addOnSuccessListener {
+//            binding.txtTotalData.text = it.childrenCount.toString()
+//        }
+
+//        query.get().addOnSuccessListener {
+//            Log.i("firebase", "Got value ${it.value}")
+//        }.addOnFailureListener{
+//            Log.e("firebase", "Error getting data", it)
+//        }
+
+//        database.child("data").addValueEventListener(object : ValueEventListener {
+//            override fun onDataChange(dataSnapshot: DataSnapshot) {
+//                for (postSnapshot in dataSnapshot.children) {
+//                    // TODO: handle the post
+//                }
+//            }
+//
+//            override fun onCancelled(databaseError: DatabaseError) {
+//                // Getting Post failed, log a message
+//                Log.w("firebase", "loadPost:onCancelled", databaseError.toException())
+//                // ...
+//            }
+//        })
+
+        val options: FirebaseRecyclerOptions<ScanStock> = FirebaseRecyclerOptions.Builder<ScanStock>()
+            .setQuery(query, ScanStock::class.java)
+            .setLifecycleOwner(this)
+            .build()
+
+        scanStockAdapter = object : FirebaseRecyclerAdapter<ScanStock, ScanStockHolder?>(options) {
+                override fun onCreateViewHolder(
+                    parent: ViewGroup,
+                    viewType: Int,
+                ): ScanStockHolder {
+                    return ScanStockHolder(LayoutInflater.from(parent.context)
+                        .inflate(R.layout.item_row, parent, false))
+                }
+
+                override fun onBindViewHolder(
+                    holder: ScanStockHolder,
+                    position: Int,
+                    model: ScanStock,
+                ) {
+                    val current = getItem(position)
+                    holder.bind(current)
+                }
+            }
+
+        binding.apply {
+            recyclerView.apply {
+                layoutManager = LinearLayoutManager(this@MainActivity)
+                adapter = scanStockAdapter
+            }
         }
 
         setContentView(view)
@@ -341,6 +414,16 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    override fun onStart() {
+        super.onStart()
+        scanStockAdapter.startListening()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        scanStockAdapter.stopListening()
+    }
+
     private fun setupPermissions() {
         val permission = ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA)
 
@@ -359,7 +442,7 @@ class MainActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
-        grantResults: IntArray
+        grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == requestCodeCameraPermission && grantResults.isNotEmpty()) {
@@ -401,7 +484,7 @@ class MainActivity : AppCompatActivity() {
                 holder: SurfaceHolder,
                 format: Int,
                 width: Int,
-                height: Int
+                height: Int,
             ) {
                 try {
                     cameraSource.start(holder)
@@ -455,4 +538,24 @@ class MainActivity : AppCompatActivity() {
         private const val CAMERA_REQ = 101
     }
 
+}
+
+class ScanStockHolder(val customView: View) : RecyclerView.ViewHolder(customView) {
+
+    private val txtSn: TextView = customView.findViewById(R.id.txtSn)
+    private val txtSn2: TextView = customView.findViewById(R.id.txtSn2)
+    private val txtRack: TextView = customView.findViewById(R.id.txtRack)
+    private val txtScan: TextView = customView.findViewById(R.id.txtScan)
+    private val txtUpload: TextView = customView.findViewById(R.id.txtUpload)
+    private val txtScanTime: TextView = customView.findViewById(R.id.txtScanTime)
+
+    @SuppressLint("SetTextI18n")
+    fun bind(scanStock: ScanStock) {
+        txtSn.text = "SN: "+ scanStock.sn
+        txtSn2.text = "SN2: "+ scanStock.sn2
+        txtRack.text = "Rack: "+ scanStock.rack
+        txtScan.text = "Scan: "+ scanStock.scan.toString()
+        txtUpload.text = "Upload: "+ scanStock.upload.toString()
+        txtScanTime.text = "Scan time: "+ scanStock.scan_datetime
+    }
 }
