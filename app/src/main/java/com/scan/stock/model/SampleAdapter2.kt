@@ -34,7 +34,7 @@ class SampleAdapter2 : ListAdapter<ScanStock, SampleAdapter2.WordViewHolder>(Wor
         fun bind(model: ScanStock) {
             txtSn.text = "SN: "+ model.sn
             txtSn2.text = "SN2: "+ model.sn2
-            txtRack.text = "Rack: "+ model.rack
+            txtRack.text = "Rack: ${model.zone}-${model.area}-${model.rack}-${model.bin}"
             txtScan.text = "Scan: "+ model.scan.toString()
             txtUpload.text = "Upload: "+ model.upload.toString()
             txtScanTime.text = "Scan time: "+ model.scan_datetime

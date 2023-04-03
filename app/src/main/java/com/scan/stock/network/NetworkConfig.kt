@@ -33,7 +33,7 @@ class NetworkConfig {
 interface ScanStockInterface {
 
     @Headers("Content-Type: application/json")
-    @POST("api.php")
+    @POST("apiv3.php")
     fun post(@Body body: Map<String, String?>): Call<ResultScanStock>
 
 }

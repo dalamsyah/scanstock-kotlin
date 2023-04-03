@@ -2,7 +2,9 @@ package com.scan.stock
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
@@ -27,6 +29,7 @@ import com.google.android.gms.vision.CameraSource
 import com.google.android.gms.vision.Detector
 import com.google.android.gms.vision.barcode.Barcode
 import com.google.android.gms.vision.barcode.BarcodeDetector
+import com.google.android.material.snackbar.Snackbar
 import com.google.firebase.database.*
 import com.google.firebase.database.ktx.database
 import com.google.firebase.ktx.Firebase
@@ -43,6 +46,9 @@ import com.scan.stock.viewmodel.MyViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
@@ -54,21 +60,25 @@ class MainActivity : AppCompatActivity() {
     lateinit var db: MyDB
     private val sampleAdapter by lazy{ SampleAdapter2() }
     lateinit var dialog: AlertDialog
-    private var rack = "-"
+    private var rack = "AA-bb-cc-dd"
 
     private val requestCodeCameraPermission = 1001
     private lateinit var cameraSource: CameraSource
     private lateinit var barcodeDetector: BarcodeDetector
     private lateinit var scanStockAdapter: FirebaseRecyclerAdapter<ScanStock, ScanStockHolder?>
     private var scannedValue = ""
-    private lateinit var database: DatabaseReference
+    private lateinit var sharedPref: SharedPreferences
+//    private lateinit var database: DatabaseReference
+
+
+    var ip = ""
 
     private val intentRack =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
 
             if (result.resultCode == Activity.RESULT_OK) {
                 val s = result.data?.getStringExtra("barcode").toString()
-                rack = s
+                rack = s.replace("]C1", "")
                 binding.txtRack.text = "Rack: ${rack}"
             }
         }
@@ -77,24 +87,27 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
 
             if (result.resultCode == Activity.RESULT_OK) {
-                val item = result.data?.getStringExtra("barcode").toString()
+                val item = result.data?.getStringExtra("barcode").toString().replace("]C1", "")
                 scanValidate(item)
             }
         }
 
-//    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-//        menuInflater.inflate(R.menu.menu_item, menu)
-//        return super.onCreateOptionsMenu(menu)
-//    }
-//
-//    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-//        when (item.itemId){
-//            R.id.setting -> {
-//
-//            }
-//        }
-//        return super.onOptionsItemSelected(item)
-//    }
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.menu_item, menu)
+        return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when (item.itemId){
+            R.id.setting -> {
+                startActivity(Intent(this@MainActivity, SettingActivity::class.java))
+            }
+            android.R.id.home -> {
+                finish()
+            }
+        }
+        return super.onOptionsItemSelected(item)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -103,7 +116,9 @@ class MainActivity : AppCompatActivity() {
 
         db = Room.databaseBuilder(applicationContext, MyDB::class.java, "my-db").fallbackToDestructiveMigration().build()
         val viewModel: MyViewModel = ViewModelProvider(this)[MyViewModel::class.java]
-        database = Firebase.database.reference
+//        database = Firebase.database.reference
+
+        sharedPref = getSharedPreferences("scanstock_pref", Context.MODE_PRIVATE)
 
         setProgressDialog()
 
@@ -128,20 +143,19 @@ class MainActivity : AppCompatActivity() {
             sampleAdapter.submitList(db.daoScanStock().getAll2())
         }
 
-//        viewModel.getList(db).observe(this) {
-//            sampleAdapter.submitList(it)
-//        }
+        binding.apply {
+            recyclerView.apply {
+                layoutManager = LinearLayoutManager(this@MainActivity)
+                adapter = sampleAdapter
+            }
+        }
+
+        viewModel.getList(db).observe(this) {
+            sampleAdapter.submitList(it)
+        }
 
         binding.btnScanManual.setOnClickListener {
-
-            database.child("data").get().addOnSuccessListener {
-                if (it.child("sn").value == "000000207917") {
-                    binding.txtCount.text = it.childrenCount.toString()
-                }
-
-            }
-
-//            scanValidate(binding.etBarcodeManual.text.toString())
+            scanValidate(binding.etBarcodeManual.text.toString())
         }
 
         binding.btnScanItem.setOnClickListener {
@@ -154,97 +168,62 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnUpload.setOnClickListener {
 
-            GlobalScope.launch {
-                var index = 1
-                db.daoScanStock().getListForUpload().forEach {
-
-                    val body = mapOf(
-                        "barcode" to it.sn,
-                        "loc" to it.loc,
-                        "zone" to it.zone,
-                        "area" to it.area,
-                        "rack" to it.rack,
-                        "bin" to it.bin,
-                        "scan_datetime" to it.scan_datetime,
-                    )
-
-                    val api = NetworkConfig().getService("https://portal.tpi-mexico.com/scanbarcode/").post(body).execute()
-
-                    println(it)
-
-                    if (api.isSuccessful) {
-
-                        api.body()?.data?.forEach { it ->
-                            it.sn?.let { it1 -> db.daoScanStock().updateAfterUpload(1, it1) }
-                        }
-
-                        return@forEach
-                    } else {
-                        return@launch
-                    }
-
-
-                }
-            }
-
-
-
         }
 
         binding.btnCalculate.setOnClickListener {
 //            viewModel.calc(context = applicationContext, db = db)
 
 
-            GlobalScope.launch {
-
-                if (db.daoScanStock().getListForUpload().isNotEmpty()) {
-//                    val builder = AlertDialog.Builder(this@MainActivity)
-//                    builder.setMessage("You have pending upload data")
-//                        .setPositiveButton("OK",
-//                            DialogInterface.OnClickListener { dialog, id ->
-//                                // START THE GAME!
-//                            })
-//                        .setNegativeButton("Cancel",
-//                            DialogInterface.OnClickListener { dialog, id ->
-//                                // User cancelled the dialog
-//                            })
-//                    // Create the AlertDialog object and return it
-//                    builder.create()
-//                    builder.show()
-                    GlobalScope.launch(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "You have pending upload data, please upload data first.", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-
-                    runOnUiThread {
-                        dialog.show()
-                    }
-
-                    try {
-                        val jsonFileString = getJsonDataFromAsset(applicationContext, "db2.json")
-                        val gson = Gson()
-                        val resultObject = object : TypeToken<ResultScanStock>() {}.type
-
-                        var results: ResultScanStock = gson.fromJson(jsonFileString, resultObject)
-
-                        var index = 1
-                        db.daoScanStock().delete()
-                        results.data.forEach {
-                            db.daoScanStock().insert(it)
-                            index++
-                        }
-
-                        sampleAdapter.submitList(db.daoScanStock().getAll2())
-
-                    } finally {
-                        runOnUiThread {
-                            dialog.dismiss()
-                        }
-                    }
-                }
-
-
-            }
+//            GlobalScope.launch {
+//
+//                if (db.daoScanStock().getListForUpload().isNotEmpty()) {
+////                    val builder = AlertDialog.Builder(this@MainActivity)
+////                    builder.setMessage("You have pending upload data")
+////                        .setPositiveButton("OK",
+////                            DialogInterface.OnClickListener { dialog, id ->
+////                                // START THE GAME!
+////                            })
+////                        .setNegativeButton("Cancel",
+////                            DialogInterface.OnClickListener { dialog, id ->
+////                                // User cancelled the dialog
+////                            })
+////                    // Create the AlertDialog object and return it
+////                    builder.create()
+////                    builder.show()
+//                    GlobalScope.launch(Dispatchers.Main) {
+//                        Toast.makeText(applicationContext, "You have pending upload data, please upload data first.", Toast.LENGTH_SHORT).show()
+//                    }
+//                } else {
+//
+//                    runOnUiThread {
+//                        dialog.show()
+//                    }
+//
+//                    try {
+//                        val jsonFileString = getJsonDataFromAsset(applicationContext, "db2.json")
+//                        val gson = Gson()
+//                        val resultObject = object : TypeToken<ResultScanStock>() {}.type
+//
+//                        var results: ResultScanStock = gson.fromJson(jsonFileString, resultObject)
+//
+//                        var index = 1
+//                        db.daoScanStock().delete()
+//                        results.data.forEach {
+//                            db.daoScanStock().insert(it)
+//                            index++
+//                        }
+//
+//                        sampleAdapter.submitList(db.daoScanStock().getAll2())
+//
+//                    } finally {
+//                        runOnUiThread {
+//                            dialog.dismiss()
+//                        }
+//                    }
+//                }
+//
+//
+//            }
 
         }
 
@@ -255,13 +234,9 @@ class MainActivity : AppCompatActivity() {
         }
 
 
-
-
-
-
-        val query: Query = database
-            .child("data")
-            .limitToLast(1)
+//        val query: Query = database
+//            .child("data")
+//            .limitToLast(1)
 
 //        val query2: Query = database
 //            .child("data")
@@ -290,36 +265,30 @@ class MainActivity : AppCompatActivity() {
 //            }
 //        })
 
-        val options: FirebaseRecyclerOptions<ScanStock> = FirebaseRecyclerOptions.Builder<ScanStock>()
-            .setQuery(query, ScanStock::class.java)
-            .setLifecycleOwner(this)
-            .build()
+//        val options: FirebaseRecyclerOptions<ScanStock> = FirebaseRecyclerOptions.Builder<ScanStock>()
+//            .setQuery(query, ScanStock::class.java)
+//            .setLifecycleOwner(this)
+//            .build()
+//
+//        scanStockAdapter = object : FirebaseRecyclerAdapter<ScanStock, ScanStockHolder?>(options) {
+//                override fun onCreateViewHolder(
+//                    parent: ViewGroup,
+//                    viewType: Int,
+//                ): ScanStockHolder {
+//                    return ScanStockHolder(LayoutInflater.from(parent.context)
+//                        .inflate(R.layout.item_row, parent, false))
+//                }
+//
+//                override fun onBindViewHolder(
+//                    holder: ScanStockHolder,
+//                    position: Int,
+//                    model: ScanStock,
+//                ) {
+//                    val current = getItem(position)
+//                    holder.bind(current)
+//                }
+//            }
 
-        scanStockAdapter = object : FirebaseRecyclerAdapter<ScanStock, ScanStockHolder?>(options) {
-                override fun onCreateViewHolder(
-                    parent: ViewGroup,
-                    viewType: Int,
-                ): ScanStockHolder {
-                    return ScanStockHolder(LayoutInflater.from(parent.context)
-                        .inflate(R.layout.item_row, parent, false))
-                }
-
-                override fun onBindViewHolder(
-                    holder: ScanStockHolder,
-                    position: Int,
-                    model: ScanStock,
-                ) {
-                    val current = getItem(position)
-                    holder.bind(current)
-                }
-            }
-
-        binding.apply {
-            recyclerView.apply {
-                layoutManager = LinearLayoutManager(this@MainActivity)
-                adapter = scanStockAdapter
-            }
-        }
 
         setContentView(view)
     }
@@ -382,46 +351,74 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun scanValidate(barcode: String) {
+
+        ip = sharedPref.getString("ip", "http://192.168.56.1/scanbarcode/")!!
+
         if (rack == "" || rack == "-") {
             Toast.makeText(applicationContext, "Scan rack first.", Toast.LENGTH_SHORT).show()
         } else {
-            GlobalScope.launch {
+            val sdf = SimpleDateFormat("yyyy-MM-dd hh:mm:ss")
+            val currentDate = sdf.format(Date())
+            val arr = rack.split("-")
 
-                if (db.daoScanStock().checkBeforeScan(barcode) > 0) {
-                    val sdf = SimpleDateFormat("yyyy-MM-dd hh:mm:ss")
-                    val currentDate = sdf.format(Date())
+            val body = mapOf(
+                "barcode" to barcode,
+                "loc" to "",
+                "zone" to arr[0],
+                "area" to arr[1],
+                "rack" to arr[2],
+                "bin" to arr[3],
+                "scan_datetime" to currentDate,
+            )
 
-                    db.daoScanStock().update(1, currentDate, barcode)
 
-                    sampleAdapter.submitList(db.daoScanStock().getAll2())
-                } else {
-                    runOnUiThread {
-                        Toast.makeText(applicationContext, "Item not found!", Toast.LENGTH_SHORT).show()
+            dialog.show()
+            NetworkConfig().getService(ip).post(body).enqueue(object : Callback<ResultScanStock> {
+
+                override fun onResponse(call: Call<ResultScanStock>, response: Response<ResultScanStock>) {
+                    dialog.dismiss()
+
+                    if (response.isSuccessful) {
+
+                        if (response.body()!!.success) {
+                            if (response.body()!!.data.isNotEmpty()){
+                                insertOrUpdate(barcode, response.body()!!.data[0])
+                            }
+
+                        } else {
+                            Snackbar.make(binding.root, response.body()!!.message, Snackbar.LENGTH_SHORT).show()
+                        }
+
                     }
+
+                    println(response.body())
                 }
 
-            }
+                override fun onFailure(call: Call<ResultScanStock>, t: Throwable) {
+                    dialog.dismiss()
+                    Snackbar.make(binding.root, t.localizedMessage, Snackbar.LENGTH_SHORT).show()
+                    println(t.localizedMessage)
+                }
+
+            })
+
+//            GlobalScope.launch {
+//
+//                if (db.daoScanStock().checkBeforeScan(barcode) > 0) {
+//                    val sdf = SimpleDateFormat("yyyy-MM-dd hh:mm:ss")
+//                    val currentDate = sdf.format(Date())
+//
+//                    db.daoScanStock().update(1, currentDate, barcode)
+//
+//                    sampleAdapter.submitList(db.daoScanStock().getAll2())
+//                } else {
+//                    runOnUiThread {
+//                        Toast.makeText(applicationContext, "Item not found!", Toast.LENGTH_SHORT).show()
+//                    }
+//                }
+//
+//            }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-//        codeScanner.startPreview()
-    }
-
-    override fun onPause() {
-//        codeScanner.releaseResources()
-        super.onPause()
-    }
-
-    override fun onStart() {
-        super.onStart()
-        scanStockAdapter.startListening()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        scanStockAdapter.stopListening()
     }
 
     private fun setupPermissions() {
@@ -468,7 +465,7 @@ class MainActivity : AppCompatActivity() {
             .setAutoFocusEnabled(true) //you should add this feature
             .build()
 
-        binding.cameraSurfaceView.getHolder().addCallback(object : SurfaceHolder.Callback {
+        binding.cameraSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             @SuppressLint("MissingPermission")
             override fun surfaceCreated(holder: SurfaceHolder) {
                 try {
@@ -536,6 +533,19 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val CAMERA_REQ = 101
+    }
+
+    fun insertOrUpdate(barcode: String, scanStock: ScanStock){
+        GlobalScope.launch {
+            db.runInTransaction {
+                val id = db.daoScanStock().getItemSN(sn = barcode)
+                if (id == null) {
+                    db.daoScanStock().insert(scanStock)
+                } else {
+                    db.daoScanStock().update(scanStock)
+                }
+            }
+        }
     }
 
 }

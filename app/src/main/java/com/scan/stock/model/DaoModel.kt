@@ -12,7 +12,7 @@ interface DaoModel {
     fun getAll2(): List<ScanStock>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(vararg scanStock: ScanStock)
+    fun insert(vararg scanStock: ScanStock)
 
     @Delete
     fun delete(scanStock: ScanStock)
@@ -40,5 +40,8 @@ interface DaoModel {
 
     @Query("SELECT COUNT(sn) FROM ScanStock WHERE sn = :barcode")
     fun checkBeforeScan(barcode: String) : Int
+
+    @Query("SELECT sn FROM ScanStock WHERE sn = :sn LIMIT 1")
+    fun getItemSN(sn: String): String?
 
 }
